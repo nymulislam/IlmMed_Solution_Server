@@ -3,6 +3,7 @@ const app = express();
 const cors = require("cors");
 const jwt = require('jsonwebtoken')
 require('dotenv').config()
+const stripe = require('stripe')(process.env.PAYMENT_SKY);
 
 // MiddleWare
 app.use(cors());
@@ -33,65 +34,7 @@ async function run() {
         const divisionsCollection = client.db('ilmMedDB').collection('divisions')
         const districtsCollection = client.db('ilmMedDB').collection('districts')
         const allTestsCollection = client.db('ilmMedDB').collection('allTests')
-
-        // normal routes start
-        app.get("/divisions", async (req, res) => {
-            const result = await divisionsCollection.find().toArray();
-            res.send(result)
-        })
-        app.get("/districts", async (req, res) => {
-            const result = await districtsCollection.find().toArray();
-            res.send(result)
-        })
-
-        // add a new test
-        app.post('/allTests', async (req, res) => {
-            const newTest = req.body;
-            const result = await allTestsCollection.insertOne(newTest);
-            res.send(result)
-        })
-
-        app.get('/allTests', async (req, res) => {
-            const result = await allTestsCollection.find().toArray();
-            res.send(result)
-        })
-
-        app.get('/allTests/:id', async (req, res) => {
-            const id = req.params.id;
-            const query = {_id: new ObjectId(id)}
-            const result = await allTestsCollection.findOne(query);
-            res.send(result)
-        })
-
-         // update user info
-         app.put('/allTests/:id', async (req, res) => {
-            const id = req.params.id;
-            const query = { _id: new ObjectId(id) };
-            const updateTest = req.body;
-            const info = {
-                $set: {
-                    name: updateTest.name,
-                    category: updateTest.category,
-                    slot: updateTest.slot,
-                    price: updateTest.price,
-                    date: updateTest.date,
-                    description: updateTest.description,
-                    testImage: updateTest.testImage,
-                }
-            }
-            const options = { upsert: true };
-            const result = await allTestsCollection.updateOne(query, info, options)
-            res.send(result)
-        })
-
-        app.delete('/allTests/:id', async (req, res) => {
-            const id = req.params.id;
-            const query = {_id: new ObjectId(id)}
-            const result = await allTestsCollection.deleteOne(query);
-            res.send(result)
-        })
-
-        // normal routes end
+        const allBannersCollection = client.db('ilmMedDB').collection('allBanners')
 
 
         // jwt token
@@ -247,6 +190,143 @@ async function run() {
             const user = await usersCollection.findOne(query);
             res.send(user);
         })
+
+
+        // normal routes start
+
+        // division data
+        app.get("/divisions", async (req, res) => {
+            const result = await divisionsCollection.find().toArray();
+            res.send(result)
+        })
+        // district data
+        app.get("/districts", async (req, res) => {
+            const result = await districtsCollection.find().toArray();
+            res.send(result)
+        })
+
+        // home page banner routs start
+        app.post('/allBanners', verifyToken, verifyAdmin, async (req, res) => {
+            const newBanner = req.body;
+            const result = await allBannersCollection.insertOne(newBanner);
+            res.send(result)
+        })
+
+        app.get('/allBanners', async (req, res) => {
+            const result = await allBannersCollection.find().toArray();
+            res.send(result)
+        })
+
+        app.patch('/allBanners/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            if (!id) {
+                return res.status(400).send({ message: 'User ID is required.' })
+            }
+            const filter = { _id: new ObjectId(id) };
+            const updatedDoc = {
+                $set: {
+                    status: req.body.status || 'block'
+                }
+            };
+            const result = await allBannersCollection.updateOne(filter, updatedDoc);
+            res.send(result)
+        })
+
+        app.patch('/deactivatedBanners', verifyToken, verifyAdmin, async (req, res) => {
+            try {
+                const result = await allBannersCollection.updateMany({}, { $set: { status: "block" } });
+                res.sendStatus(200);
+            } catch (error) {
+                console.error("Error deactivating all banners", error);
+                res.sendStatus(500);
+            }
+        })
+
+        app.delete('/allBanners/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const result = await allBannersCollection.deleteOne(query);
+            res.send(result);
+        })
+        // home page banner routs end
+
+
+        //  new test routes start
+        app.post('/allTests', verifyToken, verifyAdmin, async (req, res) => {
+            const newTest = req.body;
+            const result = await allTestsCollection.insertOne(newTest);
+            res.send(result)
+        })
+
+        app.get('/allTests', async (req, res) => {
+            const result = await allTestsCollection.find().toArray();
+            res.send(result)
+        })
+
+        // update test info
+        app.put('/allTests/:id', verifyToken, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const updateTest = req.body;
+            const info = {
+                $set: {
+                    name: updateTest.name,
+                    category: updateTest.category,
+                    slot: updateTest.slot,
+                    price: updateTest.price,
+                    deadline: updateTest.deadline,
+                    description: updateTest.description,
+                    testImage: updateTest.testImage,
+                }
+            }
+            const options = { upsert: true };
+            const result = await allTestsCollection.updateOne(query, info, options)
+            res.send(result)
+        })
+
+        app.get('/allTests/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await allTestsCollection.findOne(query);
+            res.send(result)
+        })
+
+        app.delete('/allTests/:id', verifyToken, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await allTestsCollection.deleteOne(query);
+            res.send(result)
+        })
+
+
+        // payment for test
+        app.post('/testPayment', async (req, res) => {
+            const { price } = req.body;
+            const amount = parseInt(price * 100);
+
+            try {
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount: amount,
+                    currency: 'usd',
+                    payment_method_types: [
+                        'card'
+                    ]
+                })
+                res.send({
+                    clientSecret: paymentIntent.client_secret
+                })
+
+            } catch (error) {
+                res.status(500).json({ error: 'Internal Server Error' })
+            }
+        })
+
+
+        // new test routes end
+
+        // normal routes end
+
+
 
 
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
