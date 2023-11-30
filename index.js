@@ -1,3 +1,4 @@
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const express = require("express");
 const app = express();
 const cors = require("cors");
@@ -5,15 +6,19 @@ const jwt = require('jsonwebtoken')
 require('dotenv').config()
 const stripe = require('stripe')(process.env.PAYMENT_SKY);
 
-// MiddleWare
-app.use(cors());
-app.use(express.json());
 
 const port = process.env.PORT || 5000;
 
+const corsOptions = {
+    origin: 'https://ilm-med-solution.vercel.app',
+    credentials: true,
+};
+
+// MiddleWare
+app.use(cors(corsOptions));
+app.use(express.json());
 
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.MDB_USER}:${process.env.MDB_PASS}@cluster0.tloczwa.mongodb.net/?retryWrites=true&w=majority`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -28,20 +33,22 @@ const client = new MongoClient(uri, {
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+        // await client.connect();
 
         const usersCollection = client.db('ilmMedDB').collection('allUsers')
         const divisionsCollection = client.db('ilmMedDB').collection('divisions')
         const districtsCollection = client.db('ilmMedDB').collection('districts')
         const allTestsCollection = client.db('ilmMedDB').collection('allTests')
         const allBannersCollection = client.db('ilmMedDB').collection('allBanners')
+        const recommendationsCollection = client.db('ilmMedDB').collection('recommendations')
 
 
         // jwt token
         app.post('/jwt', async (req, res) => {
             const user = req.body;
             const token = jwt.sign(user, process.env.ACCESS_TOKEN_SEC, { expiresIn: '2h' })
-            res.send({ token })
+
+            res.send({ success: true })
         })
 
         // jwt to use by middleware
@@ -324,6 +331,10 @@ async function run() {
 
         // new test routes end
 
+        app.get('/recommendations', async (req, res) => {
+            const result = await recommendationsCollection.find().toArray();
+            res.send(result);
+        })
         // normal routes end
 
 
