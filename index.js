@@ -9,14 +9,12 @@ const stripe = require('stripe')(process.env.PAYMENT_SKY);
 
 const port = process.env.PORT || 5000;
 
-const corsOptions = {
-    origin: 'https://ilm-med-solution.vercel.app',
-    credentials: true,
-};
 
 // MiddleWare
-app.use(cors(corsOptions));
+app.use(cors());
+app.options("*", cors());
 app.use(express.json());
+
 
 
 const uri = `mongodb+srv://${process.env.MDB_USER}:${process.env.MDB_PASS}@cluster0.tloczwa.mongodb.net/?retryWrites=true&w=majority`;
@@ -40,26 +38,29 @@ async function run() {
         const districtsCollection = client.db('ilmMedDB').collection('districts')
         const allTestsCollection = client.db('ilmMedDB').collection('allTests')
         const allBannersCollection = client.db('ilmMedDB').collection('allBanners')
+        const bookingsCollection = client.db('ilmMedDB').collection('bookings')
         const recommendationsCollection = client.db('ilmMedDB').collection('recommendations')
+        const promotionsCollection = client.db('ilmMedDB').collection('promotions')
 
 
         // jwt token
         app.post('/jwt', async (req, res) => {
             const user = req.body;
-            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SEC, { expiresIn: '2h' })
-
-            res.send({ success: true })
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SEC, { expiresIn: '1h' })
+            res.send({ token })
         })
 
         // jwt to use by middleware
         const verifyToken = (req, res, next) => {
+
             if (!req.headers.authorization) {
-                return res.status(401).send({ message: 'Access forbidden' });
+                return res.status(401).send({ message: 'Access unauthorized' });
             }
+
             const token = req.headers.authorization.split(' ')[1];
             jwt.verify(token, process.env.ACCESS_TOKEN_SEC, (err, decoded) => {
                 if (err) {
-                    return res.status(401).send({ message: 'Access forbidden' })
+                    return res.status(401).send({ message: 'Access unauthorized' })
                 }
                 req.decoded = decoded;
                 next();
@@ -79,13 +80,13 @@ async function run() {
         }
 
         // users route
-        app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+        app.get("/users", async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
 
         // verify admin
-        app.get('/users/admin/:email', verifyToken, async (req, res) => {
+        app.get('/users/admin/:email',  async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
                 return res.status(403).send({ message: 'Access unauthorized' })
@@ -100,7 +101,8 @@ async function run() {
             res.send({ admin });
         })
 
-        app.post("/users", verifyToken, async (req, res) => {
+        // prevent existing user info save in database
+        app.post("/users", async (req, res) => {
             const user = req.body;
             const query = { email: user.email }
             const existingUser = await usersCollection.findOne(query);
@@ -111,6 +113,21 @@ async function run() {
             res.send(result)
         })
 
+        // verify user role
+        app.get('/users/status/:email',  async (req, res) => {
+            const email = req.params.email;
+            if (email !== req.decoded.email) {
+                return res.status(403).send({ message: 'Access unauthorized' })
+            }
+
+            const query = { email: email };
+            const user = await usersCollection.findOne(query);
+            let status = false;
+            if (user) {
+                status = user?.status === 'active';
+            }
+            res.send({ active: status });
+        })
 
         // for user info
         app.get("/users/:id", verifyToken, async (req, res) => {
@@ -136,22 +153,6 @@ async function run() {
             const options = { upsert: true };
             const result = await usersCollection.updateOne(query, info, options)
             res.send(result)
-        })
-
-        // verify user
-        app.get('/users/status/:email', verifyToken, async (req, res) => {
-            const email = req.params.email;
-            if (email !== req.decoded.email) {
-                return res.status(403).send({ message: 'Access unauthorized' })
-            }
-
-            const query = { email: email };
-            const user = await usersCollection.findOne(query);
-            let status = false;
-            if (user) {
-                status = user?.status === 'active';
-            }
-            res.send({ active: status });
         })
 
         // user status handle
@@ -186,7 +187,6 @@ async function run() {
             res.send(result);
         })
 
-
         // verify user profile
         app.get('/users/userProfile/:email', verifyToken, async (req, res) => {
             const email = req.params.email;
@@ -201,16 +201,6 @@ async function run() {
 
         // normal routes start
 
-        // division data
-        app.get("/divisions", async (req, res) => {
-            const result = await divisionsCollection.find().toArray();
-            res.send(result)
-        })
-        // district data
-        app.get("/districts", async (req, res) => {
-            const result = await districtsCollection.find().toArray();
-            res.send(result)
-        })
 
         // home page banner routs start
         app.post('/allBanners', verifyToken, verifyAdmin, async (req, res) => {
@@ -258,7 +248,7 @@ async function run() {
         // home page banner routs end
 
 
-        //  new test routes start
+        //  all tests routes start
         app.post('/allTests', verifyToken, verifyAdmin, async (req, res) => {
             const newTest = req.body;
             const result = await allTestsCollection.insertOne(newTest);
@@ -327,9 +317,48 @@ async function run() {
                 res.status(500).json({ error: 'Internal Server Error' })
             }
         })
+        // all tests routes end
 
 
-        // new test routes end
+        // booking routes start
+        app.post('/allBookings', verifyToken, async (req, res) => {
+            const booking = req.body;
+            const result = await bookingsCollection.insertOne(booking);
+            res.send(result)
+        })
+
+        app.get('/allBookings', async (req, res) => {
+            const result = await bookingsCollection.find().toArray();
+            res.send(result);
+        })
+
+
+        // upcoming appointment
+        app.get('/allBookings', verifyToken, async (req, res) => {
+            let query = {};
+            if (req.query?.email) {
+                query = { email: req.query?.email }
+            }
+            const result = await bookingsCollection.find(query).toArray();
+            res.send(result);
+        })
+        // booking routes end
+
+        // division data
+        app.get("/divisions", async (req, res) => {
+            const result = await divisionsCollection.find().toArray();
+            res.send(result)
+        })
+        // district data
+        app.get("/districts", async (req, res) => {
+            const result = await districtsCollection.find().toArray();
+            res.send(result)
+        })
+
+        app.get('/promotions', async (req, res) => {
+            const result = await promotionsCollection.find().toArray();
+            res.send(result);
+        })
 
         app.get('/recommendations', async (req, res) => {
             const result = await recommendationsCollection.find().toArray();
